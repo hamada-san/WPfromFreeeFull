@@ -892,8 +892,9 @@ function getTaxCategoryReportCore(ss, companyId, startDate, endDate, taxAccounti
         if (hasTargetAccount && plLedgerRows.length === 0) {
           const debugSheet = ss.getSheetByName("PL税務検討用元帳");
           if (debugSheet) {
-            debugSheet.getRange("K15").setValue("デバッグ: 対象取引(deals)サンプル");
-            debugSheet.getRange("K16").setValue(JSON.stringify(deal.details[0]).substring(0, 500));
+            const d = deal.details[0];
+            debugSheet.getRange("K15").setValue("item_id=" + d.item_id + ", itemMap[item_id]=" + itemMap[d.item_id]);
+            debugSheet.getRange("K16").setValue("itemMap件数=" + Object.keys(itemMap).length + ", partnerMap件数=" + Object.keys(partnerMap).length);
           }
         }
 
