@@ -259,19 +259,13 @@ function getTrialBalanceAndPLCore(ss, companyId, startDateStr, endDateStr) {
   
   const taxCategoryResult = getTaxCategoryReportCore(ss, companyId, startDateStr, endDateStr, taxAccountingMethod, accountOrder, timestamp);
 
-  // ===== PL税務検討用元帳（CSV版）=====
-  const accountItemCategoryMap = getAccountItemCategoryMap(companyId);
-  try {
-    getPLTaxLedgerCore(ss, companyId, startDateStr, endDateStr, accountItemCategoryMap, timestamp);
-  } catch (e) {
-    Logger.log("PL税務検討用元帳取得エラー: " + e.message);
-    // CSV取得失敗時はAPI版のデータを使用
-    if (taxCategoryResult && taxCategoryResult.plLedgerRows) {
-      writePLTaxLedgerSheet(ss, taxCategoryResult.plLedgerRows, timestamp);
-    }
+  // ===== PL税務検討用元帳 =====
+  if (taxCategoryResult && taxCategoryResult.plLedgerRows) {
+    writePLTaxLedgerSheet(ss, taxCategoryResult.plLedgerRows, timestamp);
   }
 
   // ===== BS税務検討用内訳 =====
+  const accountItemCategoryMap = getAccountItemCategoryMap(companyId);
   try {
     getBSTaxBreakdownCore(ss, companyId, startDateStr, endDateStr, accountItemCategoryMap, timestamp);
   } catch (e) {
@@ -539,12 +533,6 @@ function getPLTaxLedgerCore(ss, companyId, startDate, endDate, accountItemCatego
   }
   
   const headers = rows[0];
-  // デバッグ用：ヘッダーをログ出力
-  Logger.log("仕訳帳CSVヘッダー: " + JSON.stringify(headers));
-  Logger.log("CSVヘッダー数: " + headers.length);
-  // デバッグ用：ヘッダーをK15:K16に出力（確認後削除）
-  sheet.getRange("K15").setValue("CSVヘッダー（" + headers.length + "列）:");
-  sheet.getRange("K16").setValue(headers.join(" | "));
 
   const debitAccountIdx = findHeaderIndex(headers, ["借方勘定科目", "借方科目", "借方勘定科目名"]);
   const creditAccountIdx = findHeaderIndex(headers, ["貸方勘定科目", "貸方科目", "貸方勘定科目名"]);
@@ -894,7 +882,7 @@ function getTaxCategoryReportCore(ss, companyId, startDate, endDate, taxAccounti
       // 取引レベルの情報を取得
       const dealPartnerId = deal.partner_id;
       const dealPartnerName = partnerMap[dealPartnerId] || "";
-      const dealRefNumber = deal.ref_number || "";
+      const isCredit = deal.type === "income";
 
       if (deal.details) {
         deal.details.forEach(detail => {
@@ -902,7 +890,6 @@ function getTaxCategoryReportCore(ss, companyId, startDate, endDate, taxAccounti
           const taxCodeName = taxCodes[detail.tax_code] || "対象外";
           const amount = detail.amount || 0;
           const vat = detail.vat || 0;
-          const isCredit = deal.type === "income";
 
           taxCategoryData.push({
             accountName: accountName,
@@ -934,10 +921,10 @@ function getTaxCategoryReportCore(ss, companyId, startDate, endDate, taxAccounti
             let tagIds = detail.tag_ids || [];
             const tagNames = getTagNames(tagIds, tagMap);
 
-            // 摘要：明細レベル → 取引レベルのref_number
+            // 摘要：明細の備考 → 取引レベルの備考
             let description = detail.description || "";
             if (!description) {
-              description = dealRefNumber;
+              description = deal.description || "";
             }
 
             plLedgerRows.push([
