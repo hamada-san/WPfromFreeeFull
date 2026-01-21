@@ -888,22 +888,18 @@ function getTaxCategoryReportCore(ss, companyId, startDate, endDate, taxAccounti
         // 対象勘定科目を含むかチェック
         const hasTargetAccount = deal.details.some(d => targetAccountIdSet.has(d.account_item_id));
 
-        // 対象勘定科目を含む場合、個別APIで詳細を取得
-        let detailsToUse = deal.details;
+        // デバッグ: 対象勘定科目を含む取引の詳細をログ出力
         if (hasTargetAccount) {
-          try {
-            const dealDetailUrl = "https://api.freee.co.jp/api/1/deals/" + deal.id + "?company_id=" + companyId;
-            const dealDetailRes = UrlFetchApp.fetch(dealDetailUrl, options);
-            const dealDetailData = JSON.parse(dealDetailRes.getContentText());
-            if (dealDetailData.deal && dealDetailData.deal.details) {
-              detailsToUse = dealDetailData.deal.details;
-            }
-          } catch (e) {
-            Logger.log("取引詳細取得エラー deal.id=" + deal.id + ": " + e.message);
-          }
+          Logger.log("対象取引 deal.id=" + deal.id + ", partner_id=" + dealPartnerId);
+          deal.details.forEach((d, idx) => {
+            Logger.log("  detail[" + idx + "]: account_item_id=" + d.account_item_id +
+              ", item_id=" + d.item_id +
+              ", tag_ids=" + JSON.stringify(d.tag_ids) +
+              ", description=" + d.description);
+          });
         }
 
-        detailsToUse.forEach(detail => {
+        deal.details.forEach(detail => {
           const accountName = accountItems[detail.account_item_id] || "";
           const taxCodeName = taxCodes[detail.tax_code] || "対象外";
           const amount = detail.amount || 0;
