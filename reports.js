@@ -541,6 +541,8 @@ function getPLTaxLedgerCore(ss, companyId, startDate, endDate, accountItemCatego
   const headers = rows[0];
   // デバッグ用：ヘッダーをログ出力
   Logger.log("仕訳帳CSVヘッダー: " + JSON.stringify(headers));
+  // デバッグ用：ヘッダーをB14に出力（確認後削除）
+  sheet.getRange("B14").setValue("ヘッダー: " + headers.join(" | "));
 
   const debitAccountIdx = findHeaderIndex(headers, ["借方勘定科目", "借方科目", "借方勘定科目名"]);
   const creditAccountIdx = findHeaderIndex(headers, ["貸方勘定科目", "貸方科目", "貸方勘定科目名"]);
