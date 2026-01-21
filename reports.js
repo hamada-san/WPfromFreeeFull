@@ -888,10 +888,13 @@ function getTaxCategoryReportCore(ss, companyId, startDate, endDate, taxAccounti
         // 対象勘定科目を含むかチェック
         const hasTargetAccount = deal.details.some(d => targetAccountIdSet.has(d.account_item_id));
 
-        // デバッグ: 最初の対象取引1件のみ詳細をログ出力
+        // デバッグ: 最初の対象取引1件のみシートに出力
         if (hasTargetAccount && plLedgerRows.length === 0) {
-          Logger.log("=== 対象取引サンプル ===");
-          Logger.log("deal全体: " + JSON.stringify(deal).substring(0, 2000));
+          const debugSheet = ss.getSheetByName("PL税務検討用元帳");
+          if (debugSheet) {
+            debugSheet.getRange("K15").setValue("デバッグ: 対象取引(deals)サンプル");
+            debugSheet.getRange("K16").setValue(JSON.stringify(deal.details[0]).substring(0, 500));
+          }
         }
 
         deal.details.forEach(detail => {
@@ -973,24 +976,16 @@ function getTaxCategoryReportCore(ss, companyId, startDate, endDate, taxAccounti
         // 対象勘定科目を含むかチェック
         const hasTargetAccount = mj.details.some(d => targetAccountIdSet.has(d.account_item_id));
 
-        // 対象勘定科目を含む場合、個別APIで詳細を取得
-        let detailsToUse = mj.details;
-        let mjDescription = "";
-        if (hasTargetAccount) {
-          try {
-            const mjDetailUrl = "https://api.freee.co.jp/api/1/manual_journals/" + mj.id + "?company_id=" + companyId;
-            const mjDetailRes = UrlFetchApp.fetch(mjDetailUrl, options);
-            const mjDetailData = JSON.parse(mjDetailRes.getContentText());
-            if (mjDetailData.manual_journal && mjDetailData.manual_journal.details) {
-              detailsToUse = mjDetailData.manual_journal.details;
-              mjDescription = mjDetailData.manual_journal.description || "";
-            }
-          } catch (e) {
-            Logger.log("振替伝票詳細取得エラー mj.id=" + mj.id + ": " + e.message);
+        // デバッグ: 最初の対象振替伝票1件のみシートに出力
+        if (hasTargetAccount && plLedgerRows.length === 0) {
+          const debugSheet = ss.getSheetByName("PL税務検討用元帳");
+          if (debugSheet) {
+            debugSheet.getRange("K15").setValue("デバッグ: 対象振替伝票(manual_journals)サンプル");
+            debugSheet.getRange("K16").setValue(JSON.stringify(mj.details[0]).substring(0, 500));
           }
         }
 
-        detailsToUse.forEach(detail => {
+        mj.details.forEach(detail => {
           const accountName = accountItems[detail.account_item_id] || "";
           const taxCodeName = taxCodes[detail.tax_code] || "対象外";
           const amount = detail.amount || 0;
@@ -1024,11 +1019,8 @@ function getTaxCategoryReportCore(ss, companyId, startDate, endDate, taxAccounti
             let tagIds = detail.tag_ids || [];
             const tagNames = getTagNames(tagIds, tagMap);
 
-            // 摘要：明細 → 振替伝票レベル
+            // 摘要：明細レベル
             let description = detail.description || "";
-            if (!description) {
-              description = mjDescription;
-            }
 
             plLedgerRows.push([
               accountItemIdToCategory[detail.account_item_id] || "",
