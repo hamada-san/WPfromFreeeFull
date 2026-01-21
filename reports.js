@@ -888,15 +888,10 @@ function getTaxCategoryReportCore(ss, companyId, startDate, endDate, taxAccounti
         // 対象勘定科目を含むかチェック
         const hasTargetAccount = deal.details.some(d => targetAccountIdSet.has(d.account_item_id));
 
-        // デバッグ: 対象勘定科目を含む取引の詳細をログ出力
-        if (hasTargetAccount) {
-          Logger.log("対象取引 deal.id=" + deal.id + ", partner_id=" + dealPartnerId);
-          deal.details.forEach((d, idx) => {
-            Logger.log("  detail[" + idx + "]: account_item_id=" + d.account_item_id +
-              ", item_id=" + d.item_id +
-              ", tag_ids=" + JSON.stringify(d.tag_ids) +
-              ", description=" + d.description);
-          });
+        // デバッグ: 最初の対象取引1件のみ詳細をログ出力
+        if (hasTargetAccount && plLedgerRows.length === 0) {
+          Logger.log("=== 対象取引サンプル ===");
+          Logger.log("deal全体: " + JSON.stringify(deal).substring(0, 2000));
         }
 
         deal.details.forEach(detail => {
