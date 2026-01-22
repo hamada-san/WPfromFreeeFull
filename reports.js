@@ -248,8 +248,9 @@ function getTrialBalanceAndPLCore(ss, companyId, startDateStr, endDateStr) {
   
   // ===== 仕訳数 =====
   const journalCount = getJournalCountForReport(companyId, startDateStr, endDateStr);
-  if (bsSheet) {
-    bsSheet.getRange("D15").setValue(journalCount + "仕訳");
+  const docketSheet = ss.getSheetByName("管理ドケット");
+  if (docketSheet) {
+    docketSheet.getRange("D15").setValue(journalCount + "仕訳");
   }
   
   // ===== 区分別表 =====
@@ -273,7 +274,12 @@ function getTrialBalanceAndPLCore(ss, companyId, startDateStr, endDateStr) {
   }
   
   // ===== 固定資産台帳 =====
-  getFixedAssetsCore(ss, companyId, fiscalYear, startDateStr);
+  // ※freeeプランによりAPIアクセス不可の場合があるためtry-catchで囲む
+  try {
+    getFixedAssetsCore(ss, companyId, fiscalYear, startDateStr);
+  } catch (e) {
+    Logger.log("固定資産台帳取得エラー: " + e.message);
+  }
 }
 
 /**
@@ -450,30 +456,37 @@ function getCategoryForAccount(accountName, accountItemCategoryMap) {
 function getNameMapFromEndpoint(resource, companyId) {
   const service = getService();
   if (!service.hasAccess()) {
-    return {};
+    return { error: "no_access" };
   }
-  
+
   const options = {
     method: "get",
     headers: { Authorization: "Bearer " + service.getAccessToken() },
     muteHttpExceptions: true
   };
-  
+
   const map = {};
-  const limit = 3000;
+  const limit = 100; // freee APIの上限は100
   let offset = 0;
   let key = "";
   if (resource === "partners") key = "partners";
   if (resource === "items") key = "items";
   if (resource === "tags") key = "tags";
   if (!key) return map;
-  
+
   while (true) {
     const url = "https://api.freee.co.jp/api/1/" + resource +
       "?company_id=" + companyId +
       "&limit=" + limit +
       "&offset=" + offset;
     const res = UrlFetchApp.fetch(url, options);
+
+    // エラーチェック
+    if (res.getResponseCode() !== 200) {
+      map._error = res.getResponseCode() + ": " + res.getContentText().substring(0, 100);
+      return map;
+    }
+
     const data = JSON.parse(res.getContentText());
     const list = data[key] || [];
     list.forEach(item => {
@@ -499,17 +512,33 @@ function writePLTaxLedgerSheet(ss, rows, timestamp) {
   if (timestamp) {
     sheet.getRange("G15").setValue(timestamp);
   }
-  
+
   const lastRow = sheet.getLastRow();
   if (lastRow >= 17) {
-    sheet.getRange(17, 2, lastRow - 16, 9).clearContent();
+    // データと罫線をクリア（B〜L列）
+    sheet.getRange(17, 2, lastRow - 16, 11).clearContent();
+    sheet.getRange(17, 2, lastRow - 16, 11).setBorder(false, false, false, false, false, false);
   }
-  
+
   const headersRow = ["大分類", "勘定科目", "税区分", "取引先タグ", "品目タグ", "メモタグ", "摘要", "借方金額", "貸方金額"];
   sheet.getRange(16, 2, 1, headersRow.length).setValues([headersRow]);
-  
+
   if (rows && rows.length > 0) {
     sheet.getRange(17, 2, rows.length, 9).setValues(rows);
+
+    // 勘定科目が変わる行の上部に罫線を引く（B〜L列）
+    let prevAccountName = "";
+    for (let i = 0; i < rows.length; i++) {
+      const currentAccountName = rows[i][1]; // 勘定科目は2列目（インデックス1）
+      if (i > 0 && currentAccountName !== prevAccountName) {
+        // 勘定科目が変わった行の上に罫線
+        sheet.getRange(17 + i, 2, 1, 11).setBorder(true, false, false, false, false, false, "#000000", SpreadsheetApp.BorderStyle.SOLID);
+      }
+      prevAccountName = currentAccountName;
+    }
+
+    // 最後のデータの下にも罫線
+    sheet.getRange(17 + rows.length - 1, 2, 1, 11).setBorder(false, false, true, false, false, false, "#000000", SpreadsheetApp.BorderStyle.SOLID);
   }
 }
 
@@ -830,9 +859,21 @@ function getTaxCategoryReportCore(ss, companyId, startDate, endDate, taxAccounti
     });
   }
   
-  // PL税務検討用元帳の対象勘定科目
-  const targetAccountNames = ["雑収入", "雑損失", "固定資産売却益", "固定資産売却損"]
-    .map(name => normalizeText(name));
+  // PL税務検討用元帳の対象勘定科目（シートのJ7:J14から読み取り）
+  const plLedgerSheet = ss.getSheetByName("PL税務検討用元帳");
+  let targetAccountNames = [];
+  if (plLedgerSheet) {
+    const configRange = plLedgerSheet.getRange("J7:J14").getValues();
+    targetAccountNames = configRange
+      .map(row => row[0])
+      .filter(v => v && String(v).trim() !== "")
+      .map(name => normalizeText(String(name)));
+  }
+  // フォールバック：シートに設定がない場合はデフォルト
+  if (targetAccountNames.length === 0) {
+    targetAccountNames = ["雑収入", "雑損失", "固定資産売却益", "固定資産売却損"]
+      .map(name => normalizeText(name));
+  }
   const targetAccountIds = Object.keys(accountItems).filter(id => {
     const name = normalizeText(accountItems[id]);
     return targetAccountNames.some(target => name === target || name.includes(target));
@@ -843,6 +884,7 @@ function getTaxCategoryReportCore(ss, companyId, startDate, endDate, taxAccounti
   let partnerMap = {};
   let itemMap = {};
   let tagMap = {};
+
   if (targetAccountIds.length > 0) {
     partnerMap = getNameMapFromEndpoint("partners", companyId);
     itemMap = getNameMapFromEndpoint("items", companyId);
@@ -885,19 +927,6 @@ function getTaxCategoryReportCore(ss, companyId, startDate, endDate, taxAccounti
       const isCredit = deal.type === "income";
 
       if (deal.details) {
-        // 対象勘定科目を含むかチェック
-        const hasTargetAccount = deal.details.some(d => targetAccountIdSet.has(d.account_item_id));
-
-        // デバッグ: 最初の対象取引1件のみシートに出力
-        if (hasTargetAccount && plLedgerRows.length === 0) {
-          const debugSheet = ss.getSheetByName("PL税務検討用元帳");
-          if (debugSheet) {
-            const d = deal.details[0];
-            debugSheet.getRange("K15").setValue("item_id=" + d.item_id + ", itemMap[item_id]=" + itemMap[d.item_id]);
-            debugSheet.getRange("K16").setValue("itemMap件数=" + Object.keys(itemMap).length + ", partnerMap件数=" + Object.keys(partnerMap).length);
-          }
-        }
-
         deal.details.forEach(detail => {
           const accountName = accountItems[detail.account_item_id] || "";
           const taxCodeName = taxCodes[detail.tax_code] || "対象外";
@@ -974,18 +1003,6 @@ function getTaxCategoryReportCore(ss, companyId, startDate, endDate, taxAccounti
     
     mjData.manual_journals.forEach(mj => {
       if (mj.details) {
-        // 対象勘定科目を含むかチェック
-        const hasTargetAccount = mj.details.some(d => targetAccountIdSet.has(d.account_item_id));
-
-        // デバッグ: 最初の対象振替伝票1件のみシートに出力
-        if (hasTargetAccount && plLedgerRows.length === 0) {
-          const debugSheet = ss.getSheetByName("PL税務検討用元帳");
-          if (debugSheet) {
-            debugSheet.getRange("K15").setValue("デバッグ: 対象振替伝票(manual_journals)サンプル");
-            debugSheet.getRange("K16").setValue(JSON.stringify(mj.details[0]).substring(0, 500));
-          }
-        }
-
         mj.details.forEach(detail => {
           const accountName = accountItems[detail.account_item_id] || "";
           const taxCodeName = taxCodes[detail.tax_code] || "対象外";
@@ -1212,8 +1229,14 @@ function getFixedAssetsCore(ss, companyId, fiscalYear, targetDateStr) {
   const fixedAssetsUrl = "https://api.freee.co.jp/api/1/fixed_assets?company_id=" + companyId +
     (targetDateStr ? "&target_date=" + targetDateStr : "");
   const fixedAssetsResponse = UrlFetchApp.fetch(fixedAssetsUrl, options);
+
+  if (fixedAssetsResponse.getResponseCode() !== 200) {
+    // プラン制限等でアクセスできない場合は終了
+    return;
+  }
+
   const fixedAssetsData = JSON.parse(fixedAssetsResponse.getContentText());
-  
+
   if (!fixedAssetsData.fixed_assets || fixedAssetsData.fixed_assets.length === 0) {
     return;
   }

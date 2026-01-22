@@ -1,4 +1,37 @@
 /**
+ * セルの値を yyyy-MM-dd 形式の文字列に変換
+ */
+function formatDateValue(value) {
+  if (!value) return "";
+
+  // Date型の場合
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+
+  // 数値（シリアル値）の場合
+  if (typeof value === "number") {
+    // Excelシリアル値からDateへ変換
+    const date = new Date((value - 25569) * 86400 * 1000);
+    return Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+
+  // 文字列の場合、yyyy-MM-dd形式かチェック
+  const str = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return str;
+  }
+
+  // 他の日付形式の場合、Dateとしてパースを試みる
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    return Utilities.formatDate(parsed, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+
+  return "";
+}
+
+/**
  * 新規クライアント作成
  */
 function createNewClient() {
@@ -258,6 +291,12 @@ function processNewClient(companyId, folderId, fiscalYearValue) {
     taxSheet.getRange("D16").setValue(companyDetails.address);
     taxSheet.getRange("D18").setValue(companyDetails.headName);
   }
+
+  // 成果物シートにフォルダURLを設定
+  const deliverableSheet = newSs.getSheetByName("成果物");
+  if (deliverableSheet && folderUrl) {
+    deliverableSheet.getRange("C11").setValue(folderUrl);
+  }
   
   const bsSheet = newSs.getSheetByName("BS");
   const plSheet = newSs.getSheetByName("PL");
@@ -283,65 +322,123 @@ function processNewClient(companyId, folderId, fiscalYearValue) {
  */
 function refreshSelectedClient() {
   const ui = SpreadsheetApp.getUi();
-  
+
   if (!checkAuth()) {
     showAuthDialog();
     return;
   }
-  
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const configSheet = ss.getSheetByName("クライアント一覧");
-  
+
   if (!configSheet) {
     ui.alert("エラー", "「クライアント一覧」シートがありません。", ui.ButtonSet.OK);
     return;
   }
-  
+
   const activeRow = configSheet.getActiveCell().getRow();
   if (activeRow <= 1) {
     ui.alert("エラー", "クライアント一覧の2行目以降を選択してください。", ui.ButtonSet.OK);
     return;
   }
-  
+
   const companyName = configSheet.getRange(activeRow, 1).getValue();
   const companyId = configSheet.getRange(activeRow, 2).getValue();
   const targetId = configSheet.getRange(activeRow, 5).getValue();
-  
+
   if (!targetId) {
     ui.alert("エラー", "スプレッドシートIDがありません。", ui.ButtonSet.OK);
     return;
   }
-  
+
+  // 上書きかoldシート保持かを選択
+  const response = ui.alert(
+    "再取得方法の選択",
+    "既存のシートを上書きしますか？\n\n" +
+    "「はい」→ 上書き\n" +
+    "「いいえ」→ 既存シートを「old_シート名」にリネームして残す",
+    ui.ButtonSet.YES_NO_CANCEL
+  );
+
+  if (response === ui.Button.CANCEL) {
+    return;
+  }
+
+  const keepOldSheets = (response === ui.Button.NO);
+
   try {
     configSheet.getRange(activeRow, 8).setValue("処理中...");
     SpreadsheetApp.flush();
-    
+
     const accessToken = getService().getAccessToken();
-    const companyDetails = getCompanyDetails(companyId, accessToken);
     const workerEmail = Session.getActiveUser().getEmail();
-    
+
     const targetSs = SpreadsheetApp.openById(targetId);
+
+    // 管理ドケットシートから元の事業年度期間を取得
     const docketSheet = targetSs.getSheetByName("管理ドケット");
+    let startDateStr, endDateStr;
     if (docketSheet) {
-      docketSheet.getRange("D11").setValue(new Date(companyDetails.startDate));
-      docketSheet.getRange("D12").setValue(new Date(companyDetails.endDate));
+      const startDateValue = docketSheet.getRange("D11").getValue();
+      const endDateValue = docketSheet.getRange("D12").getValue();
+      startDateStr = formatDateValue(startDateValue);
+      endDateStr = formatDateValue(endDateValue);
     }
-    
-    configSheet.getRange(activeRow, 3).setValue(companyDetails.periodLabel);
-    configSheet.getRange(activeRow, 4).setValue(new Date(companyDetails.endDate));
-    
+
+    if (!startDateStr || !endDateStr) {
+      throw new Error("管理ドケットシートから事業年度期間を取得できませんでした。D11（開始日）とD12（終了日）を確認してください。");
+    }
+
+    // 元の事業年度で会社詳細を取得
+    const companyDetails = getCompanyDetails(companyId, accessToken, startDateStr, endDateStr);
+
+    // oldシートとして残す場合、現在のシートをコピーしてold_シートとして保存
+    if (keepOldSheets) {
+      copyDataToOldSheets(targetSs);
+    }
+
     getTrialBalanceAndPLCore(targetSs, companyDetails.companyId, companyDetails.startDate, companyDetails.endDate);
-    
+
     configSheet.getRange(activeRow, 8).setValue("✅ 完了");
     configSheet.getRange(activeRow, 9).setValue(getTimestamp());
     configSheet.getRange(activeRow, 10).setValue(workerEmail);
-    
-    ui.alert("完了", `「${companyName}」の試算表を再取得しました。`, ui.ButtonSet.OK);
+
+    const modeText = keepOldSheets ? "（旧データはold_シートに保存）" : "";
+    ui.alert("完了", `「${companyName}」の試算表を再取得しました。${modeText}`, ui.ButtonSet.OK);
   } catch (e) {
     configSheet.getRange(activeRow, 8).setValue("❌ エラー");
     configSheet.getRange(activeRow, 9).setValue(getTimestamp());
     ui.alert("エラー", e.message, ui.ButtonSet.OK);
   }
+}
+
+/**
+ * 現在のシートをコピーしてold_シートとして保存（元シートは上書きされる）
+ */
+function copyDataToOldSheets(ss) {
+  const targetSheetNames = ["BS", "PL", "CR", "区分別表", "PL税務検討用元帳", "BS税務検討用内訳"];
+
+  targetSheetNames.forEach(sheetName => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return;
+
+    const oldSheetName = "old_" + sheetName;
+
+    // 既存のold_シートがあれば削除
+    const existingOldSheet = ss.getSheetByName(oldSheetName);
+    if (existingOldSheet) {
+      ss.deleteSheet(existingOldSheet);
+    }
+
+    // 現在のシートをコピーしてold_シートとして保存
+    const copiedSheet = sheet.copyTo(ss);
+    copiedSheet.setName(oldSheetName);
+
+    // old_シートを元シートの後ろに移動
+    const originalIndex = sheet.getIndex();
+    ss.setActiveSheet(copiedSheet);
+    ss.moveActiveSheet(originalIndex + 1);
+  });
 }
 
 function copyNamedRanges(sourceSs, targetSs) {
