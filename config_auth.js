@@ -1,6 +1,5 @@
-const Client_ID = '637667999585742';
-const Client_Secret = 'b6fc9le9j9xEwhuSPTr3ZEDwrMHa5fnHQlvblwzQ4mct1672zfq_VtyTP_4vcTgvH6mFzOdBbltTBIoM-Hzvrg';
-
+const Client_ID = '647162074272699';
+const Client_Secret = 'wukiXVLCLLzoHF9qHGaNUmwWqOMzHqYfQsHEUn9e2InPrM-15LQaUz-L_25az9omshkssbytj4XvDiUwUAt-JQ'
 /**
  * 認証サービスを定義・生成します。
  */

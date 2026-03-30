@@ -16,7 +16,7 @@ function getTimestamp() {
  */
 function getSavedFolderId() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const configSheet = ss.getSheetByName("クライアント一覧");
+  const configSheet = ss.getSheetByName(CONFIG.SHEETS.CLIENT_LIST);
   if (configSheet) {
     return configSheet.getRange("K1").getValue() || "";
   }
@@ -42,7 +42,7 @@ function getSavedFolderName() {
  */
 function saveFolderId(folderId) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let configSheet = ss.getSheetByName("クライアント一覧");
+  let configSheet = ss.getSheetByName(CONFIG.SHEETS.CLIENT_LIST);
   if (!configSheet) {
     configSheet = createConfigSheet(ss);
   }
